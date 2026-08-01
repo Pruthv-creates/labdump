@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { SupabaseFile } from '@/types/database';
 import { CopyButton } from '@/components/features/CopyButton';
+import { DownloadButton } from '@/components/features/DownloadButton';
 import { FilePasswordPrompt } from './FilePasswordPrompt';
 
 export const metadata: Metadata = {
@@ -90,15 +91,18 @@ export default async function RetrievalPage({ params }: PageProps) {
     }
   })();
 
-  // Generate short-lived signed URL for binary types
-  let signedDownloadUrl: string | null = null;
+  // Generate short-lived preview URL (inline disposition)
+  let previewUrl: string | null = null;
+  let originalFilename = `${typedFile.slug}`;
+
   if (typedFile.type !== 'note' && typedFile.storage_key) {
+    originalFilename = typedFile.storage_key.split('/').pop() || `${typedFile.slug}`;
     const { data: signedData } = await supabaseAdmin.storage
       .from('labdump-files')
-      .createSignedUrl(typedFile.storage_key, 60);
+      .createSignedUrl(typedFile.storage_key, 120);
 
     if (signedData) {
-      signedDownloadUrl = signedData.signedUrl;
+      previewUrl = signedData.signedUrl;
     }
   }
 
@@ -111,14 +115,8 @@ export default async function RetrievalPage({ params }: PageProps) {
             LABDUMP
           </Link>
           <div className="flex items-center gap-3">
-            {signedDownloadUrl && (
-              <a
-                href={signedDownloadUrl}
-                download
-                className="brutalist-btn px-4 py-1.5 text-xs font-bold uppercase tracking-wider"
-              >
-                DOWNLOAD FILE ↓
-              </a>
+            {previewUrl && (
+              <DownloadButton signedUrl={previewUrl} filename={originalFilename} />
             )}
             <div className="bg-[#000000] text-[#FFFFFF] px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-[#000000]">
               {typedFile.type.toUpperCase()}
@@ -139,49 +137,47 @@ export default async function RetrievalPage({ params }: PageProps) {
             </div>
           )}
 
-          {typedFile.type === 'image' && signedDownloadUrl && (
+          {typedFile.type === 'image' && previewUrl && (
             <div className="border-3 border-[#000000] bg-[#FFFFFF] p-2 shadow-[4px_4px_0px_#000000]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={signedDownloadUrl}
+                src={previewUrl}
                 alt={typedFile.slug}
                 className="w-full max-h-[70vh] object-contain border border-[#000000]"
               />
             </div>
           )}
 
-          {typedFile.type === 'pdf' && signedDownloadUrl && (
+          {typedFile.type === 'pdf' && previewUrl && (
             <div className="border-3 border-[#000000] bg-[#FFFFFF] p-2 shadow-[4px_4px_0px_#000000]">
               <iframe
-                src={signedDownloadUrl}
+                src={previewUrl}
                 className="w-full h-[70vh] border border-[#000000]"
                 title={typedFile.slug}
               />
             </div>
           )}
 
-          {typedFile.type === 'audio' && signedDownloadUrl && (
+          {typedFile.type === 'audio' && previewUrl && (
             <div className="border-3 border-[#000000] bg-[#FFFFFF] p-6 shadow-[4px_4px_0px_#000000]">
-              <audio controls>
-                <source src={signedDownloadUrl} type={typedFile.mime_type || undefined} />
+              <audio controls className="w-full">
+                <source src={previewUrl} type={typedFile.mime_type || undefined} />
                 BROWSER DOES NOT SUPPORT AUDIO PREVIEW.
               </audio>
             </div>
           )}
 
-          {typedFile.type === 'docx' && signedDownloadUrl && (
+          {typedFile.type === 'docx' && previewUrl && (
             <div className="border-3 border-[#000000] bg-[#FFFFFF] p-8 text-center shadow-[4px_4px_0px_#000000] space-y-4">
               <div className="text-sm font-bold uppercase tracking-wider">
                 WORD DOCUMENT (.DOCX)
               </div>
               <div>
-                <a
-                  href={signedDownloadUrl}
-                  download
+                <DownloadButton
+                  signedUrl={previewUrl}
+                  filename={originalFilename}
                   className="brutalist-btn inline-block px-8 py-3 text-xs tracking-wider uppercase"
-                >
-                  DOWNLOAD FILE →
-                </a>
+                />
               </div>
             </div>
           )}
