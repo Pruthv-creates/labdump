@@ -110,8 +110,19 @@ export default async function RetrievalPage({ params }: PageProps) {
           <Link href="/" className="text-[13px] font-bold tracking-[4px] uppercase text-[#000000]">
             LABDUMP
           </Link>
-          <div className="bg-[#000000] text-[#FFFFFF] px-3 py-1 text-xs font-bold uppercase tracking-wider border-2 border-[#000000]">
-            {typedFile.type.toUpperCase()}
+          <div className="flex items-center gap-3">
+            {signedDownloadUrl && (
+              <a
+                href={signedDownloadUrl}
+                download
+                className="brutalist-btn px-4 py-1.5 text-xs font-bold uppercase tracking-wider"
+              >
+                DOWNLOAD FILE ↓
+              </a>
+            )}
+            <div className="bg-[#000000] text-[#FFFFFF] px-3 py-1.5 text-xs font-bold uppercase tracking-wider border-2 border-[#000000]">
+              {typedFile.type.toUpperCase()}
+            </div>
           </div>
         </header>
 
