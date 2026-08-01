@@ -1,18 +1,25 @@
 'use client';
 
-import { useState, useRef, ChangeEvent, DragEvent } from 'react';
+import { useState, useRef, ChangeEvent, DragEvent, useEffect } from 'react';
 import Link from 'next/link';
 import { validateFile } from '@/lib/validation';
-import { FileType, ApiResponse } from '@/types/database';
+import { FileType, FileVisibility, ApiResponse } from '@/types/database';
 
 export default function UploadPage() {
   const [activeTab, setActiveTab] = useState<'file' | 'note'>('file');
+
+  // Workspace info
+  const [workspaceInfo, setWorkspaceInfo] = useState<{ slug: string; name: string } | null>(null);
 
   // File mode states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [derivedFileType, setDerivedFileType] = useState<FileType | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [customSlug, setCustomSlug] = useState<string>('');
+
+  // Visibility & Password
+  const [visibility, setVisibility] = useState<FileVisibility>('public');
+  const [filePassword, setFilePassword] = useState<string>('');
 
   // Note mode states
   const [noteContent, setNoteContent] = useState<string>('');
@@ -26,6 +33,18 @@ export default function UploadPage() {
   const [copied, setCopied] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch current workspace info
+  useEffect(() => {
+    fetch('/api/workspace/me')
+      .then((res) => res.json())
+      .then((res: ApiResponse<{ slug: string; name: string }>) => {
+        if (res.data) {
+          setWorkspaceInfo(res.data);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleFileSelect = (file: File) => {
     setFileError(null);
@@ -133,6 +152,8 @@ export default function UploadPage() {
           storage_key,
           size_bytes: selectedFile.size,
           mime_type: selectedFile.type,
+          visibility,
+          password: visibility === 'private' ? filePassword : undefined,
         }),
       });
       const finalizeData: ApiResponse<{ url: string }> = await finalizeRes.json();
@@ -144,7 +165,8 @@ export default function UploadPage() {
         return;
       }
 
-      const fullUrl = `${window.location.origin}${finalizeData.data.url}`;
+      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+      const fullUrl = `${baseUrl}${finalizeData.data.url}`;
       setCreatedUrl(fullUrl);
     } catch (err: any) {
       setFileError(err.message || 'UNEXPECTED ERROR OCCURRED');
@@ -188,6 +210,8 @@ export default function UploadPage() {
           type: 'note',
           slug: reservedSlug,
           content: noteContent,
+          visibility,
+          password: visibility === 'private' ? filePassword : undefined,
         }),
       });
       const finalizeData: ApiResponse<{ url: string }> = await finalizeRes.json();
@@ -199,7 +223,8 @@ export default function UploadPage() {
         return;
       }
 
-      const fullUrl = `${window.location.origin}${finalizeData.data.url}`;
+      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+      const fullUrl = `${baseUrl}${finalizeData.data.url}`;
       setCreatedUrl(fullUrl);
     } catch (err: any) {
       setNoteError(err.message || 'UNEXPECTED ERROR OCCURRED');
@@ -231,6 +256,17 @@ export default function UploadPage() {
           <Link href="/" className="text-[22px] font-bold tracking-[6px] uppercase text-[#000000]">
             LABDUMP
           </Link>
+          <div className="text-xs font-bold uppercase">
+            {workspaceInfo ? (
+              <Link href={`/w/${workspaceInfo.slug}`} className="hover:underline text-[#000000]">
+                WORKSPACE: {workspaceInfo.name.toUpperCase()} →
+              </Link>
+            ) : (
+              <Link href="/w/create" className="hover:underline text-[#FF3B00]">
+                NO WORKSPACE — CREATE ONE →
+              </Link>
+            )}
+          </div>
         </header>
 
         {/* Tab Switcher */}
@@ -350,6 +386,50 @@ export default function UploadPage() {
                   />
                 </div>
 
+                {/* VISIBILITY TOGGLE */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider">
+                    FILE VISIBILITY
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setVisibility('public')}
+                      className={`py-3 text-xs font-bold uppercase border-2 border-[#000000] shadow-[2px_2px_0px_#000000] ${
+                        visibility === 'public'
+                          ? 'bg-[#000000] text-[#FFFFFF]'
+                          : 'bg-[#FFFFFF] text-[#000000]'
+                      }`}
+                    >
+                      PUBLIC
+                    </button>
+                    <button
+                      onClick={() => setVisibility('private')}
+                      className={`py-3 text-xs font-bold uppercase border-2 border-[#000000] shadow-[2px_2px_0px_#000000] ${
+                        visibility === 'private'
+                          ? 'bg-[#000000] text-[#FFFFFF]'
+                          : 'bg-[#FFFFFF] text-[#000000]'
+                      }`}
+                    >
+                      PRIVATE
+                    </button>
+                  </div>
+                </div>
+
+                {visibility === 'private' && (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider">
+                      FILE PASSWORD
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="ENTER FILE ACCESS PASSWORD"
+                      value={filePassword}
+                      onChange={(e) => setFilePassword(e.target.value)}
+                      className="w-full bg-[#FFFFFF] border-2 border-[#000000] p-3 text-xs font-mono uppercase focus:outline-none shadow-[2px_2px_0px_#000000]"
+                    />
+                  </div>
+                )}
+
                 {statusMessage && (
                   <div className="text-xs font-bold uppercase tracking-widest text-[#000000]">
                     {statusMessage}
@@ -400,6 +480,50 @@ export default function UploadPage() {
                     className="w-full bg-[#FFFFFF] border-2 border-[#000000] p-3 text-xs font-mono uppercase focus:outline-none shadow-[2px_2px_0px_#000000]"
                   />
                 </div>
+
+                {/* VISIBILITY TOGGLE */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider">
+                    NOTE VISIBILITY
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setVisibility('public')}
+                      className={`py-3 text-xs font-bold uppercase border-2 border-[#000000] shadow-[2px_2px_0px_#000000] ${
+                        visibility === 'public'
+                          ? 'bg-[#000000] text-[#FFFFFF]'
+                          : 'bg-[#FFFFFF] text-[#000000]'
+                      }`}
+                    >
+                      PUBLIC
+                    </button>
+                    <button
+                      onClick={() => setVisibility('private')}
+                      className={`py-3 text-xs font-bold uppercase border-2 border-[#000000] shadow-[2px_2px_0px_#000000] ${
+                        visibility === 'private'
+                          ? 'bg-[#000000] text-[#FFFFFF]'
+                          : 'bg-[#FFFFFF] text-[#000000]'
+                      }`}
+                    >
+                      PRIVATE
+                    </button>
+                  </div>
+                </div>
+
+                {visibility === 'private' && (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider">
+                      NOTE PASSWORD
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="ENTER NOTE ACCESS PASSWORD"
+                      value={filePassword}
+                      onChange={(e) => setFilePassword(e.target.value)}
+                      className="w-full bg-[#FFFFFF] border-2 border-[#000000] p-3 text-xs font-mono uppercase focus:outline-none shadow-[2px_2px_0px_#000000]"
+                    />
+                  </div>
+                )}
 
                 {statusMessage && (
                   <div className="text-xs font-bold uppercase tracking-widest text-[#000000]">

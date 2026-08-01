@@ -1,8 +1,10 @@
 import { Metadata } from 'next';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { SupabaseFile } from '@/types/database';
 import { CopyButton } from '@/components/features/CopyButton';
+import { FilePasswordPrompt } from './FilePasswordPrompt';
 
 export const metadata: Metadata = {
   robots: {
@@ -58,6 +60,18 @@ export default async function RetrievalPage({ params }: PageProps) {
   }
 
   const typedFile = fileRecord as SupabaseFile;
+
+  // Check file-level visibility & lock cookie
+  const cookieStore = await cookies();
+  const isUnlocked = cookieStore.get(`file_unlock_${type}_${slug}`)?.value === 'granted';
+
+  if (typedFile.visibility === 'private' && !isUnlocked) {
+    return (
+      <main className="min-h-screen bg-[#E8E6E1] text-[#000000] flex flex-col items-center justify-center p-6 font-mono">
+        <FilePasswordPrompt type={type} slug={slug} />
+      </main>
+    );
+  }
 
   // Calculate remaining days
   const expiresDate = new Date(typedFile.expires_at);
