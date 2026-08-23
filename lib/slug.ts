@@ -18,6 +18,7 @@ const RESERVED_SLUGS = new Set([
   'image',
   'docx',
   'audio',
+  'file',
   'health',
 ]);
 

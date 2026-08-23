@@ -12,8 +12,8 @@ export default function UploadPage() {
   const [workspaceInfo, setWorkspaceInfo] = useState<{ slug: string; name: string } | null>(null);
 
   // File mode states
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [derivedFileType, setDerivedFileType] = useState<FileType | null>(null);
+  type QueuedFile = { file: File; type: FileType };
+  const [selectedFiles, setSelectedFiles] = useState<QueuedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [customSlug, setCustomSlug] = useState<string>('');
 
@@ -30,9 +30,16 @@ export default function UploadPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
+  const [createdUrls, setCreatedUrls] = useState<{ name: string; url: string }[]>([]);
   const [copied, setCopied] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [displayHost, setDisplayHost] = useState<string>('');
+  useEffect(() => {
+    const base = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+    setDisplayHost(base.replace(/^https?:\/\//, ''));
+  }, []);
 
   // Fetch current workspace info
   useEffect(() => {
@@ -46,24 +53,40 @@ export default function UploadPage() {
       .catch(() => {});
   }, []);
 
-  const handleFileSelect = (file: File) => {
+  const handleFilesSelect = (files: FileList | File[]) => {
     setFileError(null);
     setCreatedUrl(null);
-    const validation = validateFile(file);
-    if (!validation.valid) {
-      setFileError(validation.error);
-      setSelectedFile(null);
-      setDerivedFileType(null);
-      return;
+    setCreatedUrls([]);
+
+    const accepted: QueuedFile[] = [];
+    const errors: string[] = [];
+
+    Array.from(files).forEach((file) => {
+      const validation = validateFile(file);
+      if (!validation.valid || !validation.type) {
+        errors.push(`${file.name}: ${validation.error}`);
+        return;
+      }
+      accepted.push({ file, type: validation.type });
+    });
+
+    if (errors.length > 0) {
+      setFileError(errors.join(' / '));
     }
-    setSelectedFile(file);
-    setDerivedFileType(validation.type);
+    if (accepted.length > 0) {
+      setSelectedFiles((prev) => [...prev, ...accepted]);
+    }
+  };
+
+  const removeSelectedFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelect(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      handleFilesSelect(e.target.files);
     }
+    e.target.value = '';
   };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -74,102 +97,113 @@ export default function UploadPage() {
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelect(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesSelect(e.dataTransfer.files);
     }
   };
 
   const handleUploadFile = async () => {
-    if (!selectedFile || !derivedFileType) return;
+    if (selectedFiles.length === 0) return;
 
     setIsLoading(true);
     setFileError(null);
-    setStatusMessage('— RESERVING LINK');
+    setCreatedUrls([]);
+
+    const results: { name: string; url: string }[] = [];
+    const errors: string[] = [];
+    const useCustomSlug = selectedFiles.length === 1 ? customSlug || undefined : undefined;
 
     try {
-      // Step 1: Reserve slug
-      const slugRes = await fetch('/api/slug', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: derivedFileType, slug: customSlug || undefined }),
-      });
-      const slugData: ApiResponse<{ slug: string; type: FileType }> = await slugRes.json();
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const { file, type } = selectedFiles[i];
+        const progressPrefix = selectedFiles.length > 1 ? `(${i + 1}/${selectedFiles.length}) ` : '';
 
-      if (slugData.error || !slugData.data) {
-        setFileError(slugData.error || 'FAILED TO RESERVE SLUG');
-        setIsLoading(false);
-        setStatusMessage(null);
-        return;
+        try {
+          // Step 1: Reserve slug
+          setStatusMessage(`${progressPrefix}— RESERVING LINK`);
+          const slugRes = await fetch('/api/slug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type, slug: useCustomSlug }),
+          });
+          const slugData: ApiResponse<{ slug: string; type: FileType }> = await slugRes.json();
+
+          if (slugData.error || !slugData.data) {
+            errors.push(`${file.name}: ${slugData.error || 'FAILED TO RESERVE SLUG'}`);
+            continue;
+          }
+
+          const reservedSlug = slugData.data.slug;
+
+          // Step 2: Get signed upload URL
+          setStatusMessage(`${progressPrefix}— UPLOADING`);
+          const uploadUrlRes = await fetch('/api/upload-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type,
+              slug: reservedSlug,
+              filename: file.name,
+              mimeType: file.type,
+            }),
+          });
+          const uploadUrlData: ApiResponse<{ signedUrl: string; storage_key: string }> = await uploadUrlRes.json();
+
+          if (uploadUrlData.error || !uploadUrlData.data) {
+            errors.push(`${file.name}: ${uploadUrlData.error || 'FAILED TO GENERATE UPLOAD URL'}`);
+            continue;
+          }
+
+          const { signedUrl, storage_key } = uploadUrlData.data;
+
+          // Direct upload to Supabase Storage signed URL
+          const putRes = await fetch(signedUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': file.type },
+            body: file,
+          });
+
+          if (!putRes.ok) {
+            errors.push(`${file.name}: STORAGE UPLOAD FAILED`);
+            continue;
+          }
+
+          // Step 3: Finalize
+          setStatusMessage(`${progressPrefix}— FINALIZING`);
+          const finalizeRes = await fetch('/api/finalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type,
+              slug: reservedSlug,
+              storage_key,
+              size_bytes: file.size,
+              mime_type: file.type,
+              visibility,
+              password: visibility === 'private' ? filePassword : undefined,
+            }),
+          });
+          const finalizeData: ApiResponse<{ url: string }> = await finalizeRes.json();
+
+          if (finalizeData.error || !finalizeData.data) {
+            errors.push(`${file.name}: ${finalizeData.error || 'FAILED TO FINALIZE UPLOAD'}`);
+            continue;
+          }
+
+          const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+          results.push({ name: file.name, url: `${baseUrl}${finalizeData.data.url}` });
+        } catch (err: any) {
+          errors.push(`${file.name}: ${err.message || 'UNEXPECTED ERROR OCCURRED'}`);
+        }
       }
 
-      const reservedSlug = slugData.data.slug;
-
-      // Step 2: Get signed upload URL
-      setStatusMessage('— UPLOADING');
-      const uploadUrlRes = await fetch('/api/upload-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: derivedFileType,
-          slug: reservedSlug,
-          filename: selectedFile.name,
-          mimeType: selectedFile.type,
-        }),
-      });
-      const uploadUrlData: ApiResponse<{ signedUrl: string; storage_key: string }> = await uploadUrlRes.json();
-
-      if (uploadUrlData.error || !uploadUrlData.data) {
-        setFileError(uploadUrlData.error || 'FAILED TO GENERATE UPLOAD URL');
-        setIsLoading(false);
-        setStatusMessage(null);
-        return;
+      setCreatedUrls(results);
+      if (results.length === 1 && errors.length === 0) {
+        setCreatedUrl(results[0].url);
       }
-
-      const { signedUrl, storage_key } = uploadUrlData.data;
-
-      // Direct upload to Supabase Storage signed URL
-      const putRes = await fetch(signedUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': selectedFile.type },
-        body: selectedFile,
-      });
-
-      if (!putRes.ok) {
-        setFileError('STORAGE UPLOAD FAILED');
-        setIsLoading(false);
-        setStatusMessage(null);
-        return;
+      if (errors.length > 0) {
+        setFileError(errors.join(' / '));
       }
-
-      // Step 3: Finalize
-      setStatusMessage('— FINALIZING');
-      const finalizeRes = await fetch('/api/finalize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: derivedFileType,
-          slug: reservedSlug,
-          storage_key,
-          size_bytes: selectedFile.size,
-          mime_type: selectedFile.type,
-          visibility,
-          password: visibility === 'private' ? filePassword : undefined,
-        }),
-      });
-      const finalizeData: ApiResponse<{ url: string }> = await finalizeRes.json();
-
-      if (finalizeData.error || !finalizeData.data) {
-        setFileError(finalizeData.error || 'FAILED TO FINALIZE UPLOAD');
-        setIsLoading(false);
-        setStatusMessage(null);
-        return;
-      }
-
-      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
-      const fullUrl = `${baseUrl}${finalizeData.data.url}`;
-      setCreatedUrl(fullUrl);
-    } catch (err: any) {
-      setFileError(err.message || 'UNEXPECTED ERROR OCCURRED');
     } finally {
       setIsLoading(false);
       setStatusMessage(null);
@@ -300,25 +334,55 @@ export default function UploadPage() {
         </div>
 
         {/* Success Card */}
-        {createdUrl ? (
+        {createdUrl || createdUrls.length > 0 ? (
           <div className="border-3 border-[#000000] bg-[#FFFFFF] p-6 shadow-[4px_4px_0px_#000000] space-y-4">
             <h2 className="text-[#FF3B00] font-bold text-sm tracking-wider uppercase">
-              LINK READY
+              {createdUrls.length > 1 ? `${createdUrls.length} LINKS READY` : 'LINK READY'}
             </h2>
-            <div className="p-3 bg-[#E8E6E1] border-2 border-[#000000] text-xs font-mono break-all font-bold">
-              {createdUrl}
-            </div>
+
+            {createdUrls.length > 1 ? (
+              <div className="space-y-3">
+                {createdUrls.map((item, i) => (
+                  <div key={i} className="space-y-1">
+                    <div className="text-[10px] font-bold uppercase text-[#666666] truncate">
+                      {item.name}
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <div className="flex-1 p-3 bg-[#E8E6E1] border-2 border-[#000000] text-xs font-mono break-all font-bold">
+                        {item.url}
+                      </div>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(item.url);
+                        }}
+                        className="brutalist-btn-accent px-3 py-3 text-xs tracking-wider uppercase shrink-0"
+                      >
+                        COPY
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-3 bg-[#E8E6E1] border-2 border-[#000000] text-xs font-mono break-all font-bold">
+                {createdUrl}
+              </div>
+            )}
+
             <div className="flex gap-4 items-center pt-2">
-              <button
-                onClick={handleCopy}
-                className="brutalist-btn-accent px-6 py-3 text-xs tracking-wider uppercase flex-1"
-              >
-                {copied ? 'COPIED!' : 'COPY'}
-              </button>
+              {createdUrls.length <= 1 && (
+                <button
+                  onClick={handleCopy}
+                  className="brutalist-btn-accent px-6 py-3 text-xs tracking-wider uppercase flex-1"
+                >
+                  {copied ? 'COPIED!' : 'COPY'}
+                </button>
+              )}
               <button
                 onClick={() => {
                   setCreatedUrl(null);
-                  setSelectedFile(null);
+                  setCreatedUrls([]);
+                  setSelectedFiles([]);
                   setNoteContent('');
                 }}
                 className="text-xs font-bold uppercase underline hover:text-[#FF3B00]"
@@ -342,27 +406,43 @@ export default function UploadPage() {
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileInputChange}
+                    multiple
                     className="hidden"
                   />
-                  {selectedFile ? (
-                    <div className="w-full flex justify-between items-center bg-[#E8E6E1] border-2 border-[#000000] p-4 text-xs font-bold">
-                      <span className="truncate max-w-[80%] uppercase">
-                        {selectedFile.name} ({formatFileSize(selectedFile.size)})
-                      </span>
-                      <button
+                  {selectedFiles.length > 0 ? (
+                    <div className="w-full space-y-2">
+                      {selectedFiles.map((qf, i) => (
+                        <div
+                          key={i}
+                          className="w-full flex justify-between items-center bg-[#E8E6E1] border-2 border-[#000000] p-4 text-xs font-bold"
+                        >
+                          <span className="truncate max-w-[80%] uppercase">
+                            {qf.file.name} ({formatFileSize(qf.file.size)})
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeSelectedFile(i);
+                            }}
+                            className="text-[#FF3B00] font-bold hover:opacity-80 px-2"
+                          >
+                            [X]
+                          </button>
+                        </div>
+                      ))}
+                      <div
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedFile(null);
-                          setDerivedFileType(null);
+                          fileInputRef.current?.click();
                         }}
-                        className="text-[#FF3B00] font-bold hover:opacity-80 px-2"
+                        className="text-[10px] font-bold uppercase text-[#666666] hover:text-[#FF3B00] underline pt-1"
                       >
-                        [X]
-                      </button>
+                        + ADD MORE FILES
+                      </div>
                     </div>
                   ) : (
                     <div className="text-xs font-bold uppercase text-[#000000] tracking-wider">
-                      DROP FILE HERE OR CLICK TO BROWSE
+                      DROP FILES HERE OR CLICK TO BROWSE
                     </div>
                   )}
                 </div>
@@ -373,18 +453,25 @@ export default function UploadPage() {
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <label className="block text-xs font-bold uppercase tracking-wider">
-                    CUSTOM SLUG (OPTIONAL)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. cs101-notes"
-                    value={customSlug}
-                    onChange={(e) => setCustomSlug(e.target.value)}
-                    className="w-full bg-[#FFFFFF] border-2 border-[#000000] p-3 text-xs font-mono uppercase focus:outline-none shadow-[2px_2px_0px_#000000]"
-                  />
-                </div>
+                {selectedFiles.length <= 1 && (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider">
+                      CUSTOM LINK (OPTIONAL)
+                    </label>
+                    <div className="w-full flex items-stretch flex-wrap gap-y-1">
+                      <span className="flex items-center pr-2 text-xs font-mono font-bold text-[#000000] whitespace-nowrap select-none">
+                        {displayHost}/{selectedFiles[0]?.type || 'file'}/
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="cs101-notes"
+                        value={customSlug}
+                        onChange={(e) => setCustomSlug(e.target.value)}
+                        className="min-w-0 flex-1 bg-[#FFFFFF] border-2 border-[#000000] p-3 text-xs font-mono uppercase focus:outline-none shadow-[2px_2px_0px_#000000]"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* VISIBILITY TOGGLE */}
                 <div className="space-y-2">
@@ -438,10 +525,10 @@ export default function UploadPage() {
 
                 <button
                   onClick={handleUploadFile}
-                  disabled={!selectedFile || isLoading}
+                  disabled={selectedFiles.length === 0 || isLoading}
                   className="w-full py-4 text-sm font-bold tracking-widest uppercase bg-[#000000] text-[#FFFFFF] border-2 border-[#000000] shadow-[4px_4px_0px_#000000] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[4px_4px_0px_#000000]"
                 >
-                  SHARE →
+                  {selectedFiles.length > 1 ? `SHARE ${selectedFiles.length} FILES →` : 'SHARE →'}
                 </button>
               </div>
             )}
@@ -470,15 +557,20 @@ export default function UploadPage() {
 
                 <div className="space-y-2">
                   <label className="block text-xs font-bold uppercase tracking-wider">
-                    CUSTOM SLUG (OPTIONAL)
+                    CUSTOM LINK (OPTIONAL)
                   </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. lab3-solution"
-                    value={noteSlug}
-                    onChange={(e) => setNoteSlug(e.target.value)}
-                    className="w-full bg-[#FFFFFF] border-2 border-[#000000] p-3 text-xs font-mono uppercase focus:outline-none shadow-[2px_2px_0px_#000000]"
-                  />
+                  <div className="w-full flex items-stretch flex-wrap gap-y-1">
+                    <span className="flex items-center pr-2 text-xs font-mono font-bold text-[#000000] whitespace-nowrap select-none">
+                      {displayHost}/note/
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="lab3-solution"
+                      value={noteSlug}
+                      onChange={(e) => setNoteSlug(e.target.value)}
+                      className="min-w-0 flex-1 bg-[#FFFFFF] border-2 border-[#000000] p-3 text-xs font-mono uppercase focus:outline-none shadow-[2px_2px_0px_#000000]"
+                    />
+                  </div>
                 </div>
 
                 {/* VISIBILITY TOGGLE */}

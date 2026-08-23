@@ -3,9 +3,9 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { SupabaseFile } from '@/types/database';
-import { CopyButton } from '@/components/features/CopyButton';
 import { DownloadButton } from '@/components/features/DownloadButton';
 import { FilePasswordPrompt } from './FilePasswordPrompt';
+import { EditableNote } from './EditableNote';
 
 export const metadata: Metadata = {
   robots: {
@@ -127,14 +127,7 @@ export default async function RetrievalPage({ params }: PageProps) {
         {/* Content Viewer */}
         <div className="space-y-6">
           {typedFile.type === 'note' && (
-            <div className="space-y-4">
-              <div className="border-3 border-[#000000] bg-[#FFFFFF] p-6 shadow-[4px_4px_0px_#000000]">
-                <pre className="text-xs font-mono whitespace-pre-wrap break-all uppercase leading-relaxed">
-                  {typedFile.content || '(EMPTY NOTE)'}
-                </pre>
-              </div>
-              <CopyButton textToCopy={typedFile.content || ''} />
-            </div>
+            <EditableNote slug={typedFile.slug} initialContent={typedFile.content || ''} />
           )}
 
           {typedFile.type === 'image' && previewUrl && (
@@ -171,6 +164,21 @@ export default async function RetrievalPage({ params }: PageProps) {
             <div className="border-3 border-[#000000] bg-[#FFFFFF] p-8 text-center shadow-[4px_4px_0px_#000000] space-y-4">
               <div className="text-sm font-bold uppercase tracking-wider">
                 WORD DOCUMENT (.DOCX)
+              </div>
+              <div>
+                <DownloadButton
+                  signedUrl={previewUrl}
+                  filename={originalFilename}
+                  className="brutalist-btn inline-block px-8 py-3 text-xs tracking-wider uppercase"
+                />
+              </div>
+            </div>
+          )}
+
+          {typedFile.type === 'file' && previewUrl && (
+            <div className="border-3 border-[#000000] bg-[#FFFFFF] p-8 text-center shadow-[4px_4px_0px_#000000] space-y-4">
+              <div className="text-sm font-bold uppercase tracking-wider break-all">
+                {originalFilename}
               </div>
               <div>
                 <DownloadButton

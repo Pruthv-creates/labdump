@@ -1,6 +1,6 @@
 import { FileType } from '@/types/database';
 
-export function getMimeToType(mime: string): FileType | null {
+export function getMimeToType(mime: string): FileType {
   switch (mime) {
     case 'application/pdf':
       return 'pdf';
@@ -17,7 +17,7 @@ export function getMimeToType(mime: string): FileType | null {
     case 'audio/mp4':
       return 'audio';
     default:
-      return null;
+      return 'file';
   }
 }
 
@@ -37,18 +37,9 @@ export function validateFile(file: File): {
     };
   }
 
-  const derivedType = getMimeToType(file.type);
-  if (!derivedType) {
-    return {
-      valid: false,
-      error: `Unsupported file type (${file.type || 'unknown'}). Allowed: PDF, Images (JPEG/PNG/GIF/WEBP), Word Docs (.docx), and Audio (MP3/WAV/OGG/MP4).`,
-      type: null,
-    };
-  }
-
   return {
     valid: true,
     error: null,
-    type: derivedType,
+    type: getMimeToType(file.type),
   };
 }

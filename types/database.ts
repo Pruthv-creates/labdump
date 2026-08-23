@@ -1,4 +1,4 @@
-export type FileType = 'pdf' | 'image' | 'docx' | 'audio' | 'note';
+export type FileType = 'pdf' | 'image' | 'docx' | 'audio' | 'note' | 'file';
 
 export type FileStatus = 'pending' | 'active' | 'expired';
 

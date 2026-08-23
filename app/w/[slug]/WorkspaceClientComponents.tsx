@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiResponse } from '@/types/database';
+import { getMimeToType } from '@/lib/validation';
 
 export function WorkspacePasswordPrompt({ slug }: { slug: string }) {
   const router = useRouter();
@@ -76,79 +77,94 @@ export function WorkspacePasswordPrompt({ slug }: { slug: string }) {
 
 export function InlineDropZone({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      await processUpload(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      await processUploads(Array.from(e.dataTransfer.files));
     }
   };
 
   const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      await processUpload(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      await processUploads(Array.from(e.target.files));
     }
+    e.target.value = '';
   };
 
-  const processUpload = async (file: File) => {
+  const processUploads = async (files: File[]) => {
     setIsUploading(true);
     setErrorMsg(null);
 
-    try {
-      // 1. Slug
-      const slugRes = await fetch('/api/slug', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'pdf' }), // derived fallback
-      });
-      const slugData = await slugRes.json();
-      if (slugData.error) throw new Error(slugData.error);
+    const errors: string[] = [];
 
-      const reservedSlug = slugData.data.slug;
-
-      // 2. Upload URL
-      const uploadRes = await fetch('/api/upload-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'pdf',
-          slug: reservedSlug,
-          filename: file.name,
-          mimeType: file.type || 'application/pdf',
-        }),
-      });
-      const uploadData = await uploadRes.json();
-      if (uploadData.error) throw new Error(uploadData.error);
-
-      // Storage PUT
-      await fetch(uploadData.data.signedUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type || 'application/pdf' },
-        body: file,
-      });
-
-      // 3. Finalize
-      await fetch('/api/finalize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'pdf',
-          slug: reservedSlug,
-          storage_key: uploadData.data.storage_key,
-          size_bytes: file.size,
-          mime_type: file.type || 'application/pdf',
-        }),
-      });
-
-      router.refresh();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'UPLOAD FAILED');
-    } finally {
-      setIsUploading(false);
+    for (let i = 0; i < files.length; i++) {
+      setUploadProgress(files.length > 1 ? `${i + 1}/${files.length}` : null);
+      try {
+        await processUpload(files[i]);
+      } catch (err: any) {
+        errors.push(`${files[i].name}: ${err.message || 'UPLOAD FAILED'}`);
+      }
     }
+
+    if (errors.length > 0) {
+      setErrorMsg(errors.join(' / '));
+    }
+    setUploadProgress(null);
+    setIsUploading(false);
+    router.refresh();
+  };
+
+  const processUpload = async (file: File) => {
+    const type = getMimeToType(file.type);
+
+    // 1. Slug
+    const slugRes = await fetch('/api/slug', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type }),
+    });
+    const slugData = await slugRes.json();
+    if (slugData.error) throw new Error(slugData.error);
+
+    const reservedSlug = slugData.data.slug;
+
+    // 2. Upload URL
+    const uploadRes = await fetch('/api/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type,
+        slug: reservedSlug,
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+      }),
+    });
+    const uploadData = await uploadRes.json();
+    if (uploadData.error) throw new Error(uploadData.error);
+
+    // Storage PUT
+    await fetch(uploadData.data.signedUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+
+    // 3. Finalize
+    await fetch('/api/finalize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type,
+        slug: reservedSlug,
+        storage_key: uploadData.data.storage_key,
+        size_bytes: file.size,
+        mime_type: file.type || 'application/octet-stream',
+      }),
+    });
   };
 
   return (
@@ -157,9 +173,11 @@ export function InlineDropZone({ workspaceId }: { workspaceId: string }) {
       onDrop={handleDrop}
       className="border-2 border-dashed border-[#000000] bg-[#FFFFFF] p-6 text-center shadow-[2px_2px_0px_#000000] space-y-2 cursor-pointer"
     >
-      <input type="file" id="inline-file" onChange={handleChange} className="hidden" />
+      <input type="file" id="inline-file" onChange={handleChange} multiple className="hidden" />
       <label htmlFor="inline-file" className="cursor-pointer text-xs font-bold uppercase block">
-        {isUploading ? '— UPLOADING FILE...' : 'DROP A FILE HERE OR CLICK TO UPLOAD TO WORKSPACE'}
+        {isUploading
+          ? `— UPLOADING FILE${uploadProgress ? ` ${uploadProgress}` : ''}...`
+          : 'DROP FILES HERE OR CLICK TO UPLOAD TO WORKSPACE'}
       </label>
       {errorMsg && <div className="text-xs font-bold text-[#FF3B00]">{errorMsg}</div>}
     </div>
