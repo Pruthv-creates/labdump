@@ -30,7 +30,6 @@ export default function UploadPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
-  const [createdUrls, setCreatedUrls] = useState<{ name: string; url: string }[]>([]);
   const [copied, setCopied] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -56,7 +55,6 @@ export default function UploadPage() {
   const handleFilesSelect = (files: FileList | File[]) => {
     setFileError(null);
     setCreatedUrl(null);
-    setCreatedUrls([]);
 
     const accepted: QueuedFile[] = [];
     const errors: string[] = [];
@@ -107,16 +105,41 @@ export default function UploadPage() {
 
     setIsLoading(true);
     setFileError(null);
-    setCreatedUrls([]);
+    setCreatedUrl(null);
 
-    const results: { name: string; url: string }[] = [];
-    const errors: string[] = [];
-    const useCustomSlug = selectedFiles.length === 1 ? customSlug || undefined : undefined;
+    const isBundle = selectedFiles.length > 1;
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+
+    let bundleWorkspaceId: string | undefined;
+    let bundleSlug: string | undefined;
 
     try {
+      if (isBundle) {
+        setStatusMessage('— RESERVING LINK');
+        const bundleRes = await fetch('/api/bundle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slug: customSlug || undefined }),
+        });
+        const bundleData: ApiResponse<{ id: string; slug: string }> = await bundleRes.json();
+
+        if (bundleData.error || !bundleData.data) {
+          setFileError(bundleData.error || 'FAILED TO RESERVE LINK');
+          setIsLoading(false);
+          setStatusMessage(null);
+          return;
+        }
+
+        bundleWorkspaceId = bundleData.data.id;
+        bundleSlug = bundleData.data.slug;
+      }
+
+      const errors: string[] = [];
+      let singleFileUrl: string | null = null;
+
       for (let i = 0; i < selectedFiles.length; i++) {
         const { file, type } = selectedFiles[i];
-        const progressPrefix = selectedFiles.length > 1 ? `(${i + 1}/${selectedFiles.length}) ` : '';
+        const progressPrefix = isBundle ? `(${i + 1}/${selectedFiles.length}) ` : '';
 
         try {
           // Step 1: Reserve slug
@@ -124,7 +147,7 @@ export default function UploadPage() {
           const slugRes = await fetch('/api/slug', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type, slug: useCustomSlug }),
+            body: JSON.stringify({ type, slug: !isBundle ? customSlug || undefined : undefined }),
           });
           const slugData: ApiResponse<{ slug: string; type: FileType }> = await slugRes.json();
 
@@ -181,6 +204,7 @@ export default function UploadPage() {
               mime_type: file.type,
               visibility,
               password: visibility === 'private' ? filePassword : undefined,
+              bundle_workspace_id: bundleWorkspaceId,
             }),
           });
           const finalizeData: ApiResponse<{ url: string }> = await finalizeRes.json();
@@ -190,19 +214,22 @@ export default function UploadPage() {
             continue;
           }
 
-          const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
-          results.push({ name: file.name, url: `${baseUrl}${finalizeData.data.url}` });
+          if (!isBundle) {
+            singleFileUrl = `${baseUrl}${finalizeData.data.url}`;
+          }
         } catch (err: any) {
           errors.push(`${file.name}: ${err.message || 'UNEXPECTED ERROR OCCURRED'}`);
         }
       }
 
-      setCreatedUrls(results);
-      if (results.length === 1 && errors.length === 0) {
-        setCreatedUrl(results[0].url);
-      }
       if (errors.length > 0) {
         setFileError(errors.join(' / '));
+      }
+
+      if (isBundle && bundleSlug && errors.length === 0) {
+        setCreatedUrl(`${baseUrl}/bundle/${bundleSlug}`);
+      } else if (!isBundle && singleFileUrl) {
+        setCreatedUrl(singleFileUrl);
       }
     } finally {
       setIsLoading(false);
@@ -334,54 +361,26 @@ export default function UploadPage() {
         </div>
 
         {/* Success Card */}
-        {createdUrl || createdUrls.length > 0 ? (
+        {createdUrl ? (
           <div className="border-3 border-[#000000] bg-[#FFFFFF] p-6 shadow-[4px_4px_0px_#000000] space-y-4">
             <h2 className="text-[#FF3B00] font-bold text-sm tracking-wider uppercase">
-              {createdUrls.length > 1 ? `${createdUrls.length} LINKS READY` : 'LINK READY'}
+              LINK READY
             </h2>
 
-            {createdUrls.length > 1 ? (
-              <div className="space-y-3">
-                {createdUrls.map((item, i) => (
-                  <div key={i} className="space-y-1">
-                    <div className="text-[10px] font-bold uppercase text-[#666666] truncate">
-                      {item.name}
-                    </div>
-                    <div className="flex gap-2 items-center">
-                      <div className="flex-1 p-3 bg-[#E8E6E1] border-2 border-[#000000] text-xs font-mono break-all font-bold">
-                        {item.url}
-                      </div>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(item.url);
-                        }}
-                        className="brutalist-btn-accent px-3 py-3 text-xs tracking-wider uppercase shrink-0"
-                      >
-                        COPY
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="p-3 bg-[#E8E6E1] border-2 border-[#000000] text-xs font-mono break-all font-bold">
-                {createdUrl}
-              </div>
-            )}
+            <div className="p-3 bg-[#E8E6E1] border-2 border-[#000000] text-xs font-mono break-all font-bold">
+              {createdUrl}
+            </div>
 
             <div className="flex gap-4 items-center pt-2">
-              {createdUrls.length <= 1 && (
-                <button
-                  onClick={handleCopy}
-                  className="brutalist-btn-accent px-6 py-3 text-xs tracking-wider uppercase flex-1"
-                >
-                  {copied ? 'COPIED!' : 'COPY'}
-                </button>
-              )}
+              <button
+                onClick={handleCopy}
+                className="brutalist-btn-accent px-6 py-3 text-xs tracking-wider uppercase flex-1"
+              >
+                {copied ? 'COPIED!' : 'COPY'}
+              </button>
               <button
                 onClick={() => {
                   setCreatedUrl(null);
-                  setCreatedUrls([]);
                   setSelectedFiles([]);
                   setNoteContent('');
                 }}
@@ -453,25 +452,28 @@ export default function UploadPage() {
                   </div>
                 )}
 
-                {selectedFiles.length <= 1 && (
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold uppercase tracking-wider">
-                      CUSTOM LINK (OPTIONAL)
-                    </label>
-                    <div className="w-full flex items-stretch flex-wrap gap-y-1">
-                      <span className="flex items-center pr-2 text-xs font-mono font-bold text-[#000000] whitespace-nowrap select-none">
-                        {displayHost}/{selectedFiles[0]?.type || 'file'}/
-                      </span>
-                      <input
-                        type="text"
-                        placeholder="cs101-notes"
-                        value={customSlug}
-                        onChange={(e) => setCustomSlug(e.target.value)}
-                        className="min-w-0 flex-1 bg-[#FFFFFF] border-2 border-[#000000] p-3 text-xs font-mono uppercase focus:outline-none shadow-[2px_2px_0px_#000000]"
-                      />
-                    </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider">
+                    CUSTOM LINK (OPTIONAL)
+                  </label>
+                  <div className="w-full flex items-stretch flex-wrap gap-y-1">
+                    <span className="flex items-center pr-2 text-xs font-mono font-bold text-[#000000] whitespace-nowrap select-none">
+                      {displayHost}/{selectedFiles.length > 1 ? 'bundle' : selectedFiles[0]?.type || 'file'}/
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="cs101-notes"
+                      value={customSlug}
+                      onChange={(e) => setCustomSlug(e.target.value)}
+                      className="min-w-0 flex-1 bg-[#FFFFFF] border-2 border-[#000000] p-3 text-xs font-mono uppercase focus:outline-none shadow-[2px_2px_0px_#000000]"
+                    />
                   </div>
-                )}
+                  {selectedFiles.length > 1 && (
+                    <p className="text-[10px] font-bold uppercase text-[#666666]">
+                      ALL {selectedFiles.length} FILES WILL SHARE THIS ONE LINK
+                    </p>
+                  )}
+                </div>
 
                 {/* VISIBILITY TOGGLE */}
                 <div className="space-y-2">

@@ -20,6 +20,7 @@ export async function POST(request: Request) {
       content,
       visibility = 'public',
       password,
+      bundle_workspace_id,
     }: {
       type: FileType;
       slug: string;
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
       content?: string;
       visibility?: FileVisibility;
       password?: string;
+      bundle_workspace_id?: string;
     } = body;
 
     if (!type || !slug) {
@@ -63,7 +65,9 @@ export async function POST(request: Request) {
     let targetWorkspaceId: string | null = null;
     let newWorkspaceCreated: { id: string; slug: string } | null = null;
 
-    if (ownerToken) {
+    if (bundle_workspace_id) {
+      targetWorkspaceId = bundle_workspace_id;
+    } else if (ownerToken) {
       const workspace = await getWorkspaceByToken(ownerToken);
       if (workspace) {
         targetWorkspaceId = workspace.id;

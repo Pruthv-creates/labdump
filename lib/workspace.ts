@@ -7,6 +7,7 @@ const RESERVED_WORKSPACE_SLUGS = new Set([
   'api',
   'upload',
   'w',
+  'bundle',
   'public',
   'share',
   'restore',
