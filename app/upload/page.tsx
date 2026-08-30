@@ -4,6 +4,7 @@ import { useState, useRef, ChangeEvent, DragEvent, useEffect } from 'react';
 import Link from 'next/link';
 import { validateFile } from '@/lib/validation';
 import { FileType, FileVisibility, ApiResponse } from '@/types/database';
+import { QrCode } from '@/components/features/QrCode';
 
 export default function UploadPage() {
   const [activeTab, setActiveTab] = useState<'file' | 'note'>('file');
@@ -367,17 +368,31 @@ export default function UploadPage() {
               LINK READY
             </h2>
 
-            <div className="p-3 bg-[#E8E6E1] border-2 border-[#000000] text-xs font-mono break-all font-bold">
-              {createdUrl}
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1 space-y-4">
+                <div className="p-3 bg-[#E8E6E1] border-2 border-[#000000] text-xs font-mono break-all font-bold">
+                  {createdUrl}
+                </div>
+
+                <div className="flex gap-4 items-center">
+                  <button
+                    onClick={handleCopy}
+                    className="brutalist-btn-accent px-6 py-3 text-xs tracking-wider uppercase flex-1"
+                  >
+                    {copied ? 'COPIED!' : 'COPY LINK'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col items-center gap-2 shrink-0">
+                <QrCode value={createdUrl} size={120} />
+                <span className="text-[10px] font-bold uppercase text-[#666666] text-center">
+                  SCAN TO OPEN ON PHONE
+                </span>
+              </div>
             </div>
 
-            <div className="flex gap-4 items-center pt-2">
-              <button
-                onClick={handleCopy}
-                className="brutalist-btn-accent px-6 py-3 text-xs tracking-wider uppercase flex-1"
-              >
-                {copied ? 'COPIED!' : 'COPY'}
-              </button>
+            <div className="pt-2">
               <button
                 onClick={() => {
                   setCreatedUrl(null);
