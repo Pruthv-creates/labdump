@@ -318,17 +318,13 @@ export default function UploadPage() {
           <Link href="/" className="text-[22px] font-bold tracking-[6px] uppercase text-[#000000]">
             LABDUMP
           </Link>
-          <div className="text-xs font-bold uppercase">
-            {workspaceInfo ? (
-              <Link href={`/w/${workspaceInfo.slug}`} className="hover:underline text-[#000000]">
-                WORKSPACE: {workspaceInfo.name.toUpperCase()} →
+          {workspaceInfo && (
+            <div className="text-xs font-bold uppercase">
+              <Link href={`/w/${workspaceInfo.slug}`} className="hover:underline text-[#666666]">
+                MY FILES →
               </Link>
-            ) : (
-              <Link href="/w/create" className="hover:underline text-[#FF3B00]">
-                NO WORKSPACE — CREATE ONE →
-              </Link>
-            )}
-          </div>
+            </div>
+          )}
         </header>
 
         {/* Tab Switcher */}

@@ -7,7 +7,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { slug, type, password }: { slug?: string; type?: string; password?: string } = body;
 
-    if (!slug || !type || !password) {
+    if (!slug || !type || !password || !password.trim()) {
       return NextResponse.json({ data: null, error: 'MISSING_FIELDS' }, { status: 400 });
     }
 
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ data: null, error: 'FILE_NOT_FOUND' }, { status: 404 });
     }
 
-    const isValid = await bcrypt.compare(password, fileRecord.password_hash);
+    const isValid = await bcrypt.compare(password.trim(), fileRecord.password_hash);
     if (!isValid) {
       return NextResponse.json({ data: null, error: 'WRONG_PASSWORD' }, { status: 401 });
     }

@@ -68,10 +68,10 @@ export async function createWorkspace(
 
   let passwordHash: string | null = null;
   if (mode === 'protected') {
-    if (!password) {
+    if (!password || !password.trim()) {
       throw new Error('PASSWORD_REQUIRED');
     }
-    passwordHash = await bcrypt.hash(password, 10);
+    passwordHash = await bcrypt.hash(password.trim(), 10);
   }
 
   const { data, error } = await supabaseAdmin
@@ -94,8 +94,8 @@ export async function createWorkspace(
 }
 
 export async function verifyWorkspacePassword(slug: string, password?: string): Promise<boolean> {
-  if (!slug || !password) return false;
+  if (!slug || !password || !password.trim()) return false;
   const workspace = await getWorkspaceBySlug(slug);
   if (!workspace || !workspace.password_hash) return false;
-  return await bcrypt.compare(password, workspace.password_hash);
+  return await bcrypt.compare(password.trim(), workspace.password_hash);
 }

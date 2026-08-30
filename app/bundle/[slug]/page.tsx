@@ -1,5 +1,6 @@
 import { Metadata } from 'next';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { getWorkspaceBySlug } from '@/lib/workspace';
 import { SupabaseFile } from '@/types/database';
@@ -65,14 +66,24 @@ export default async function BundlePage({ params }: PageProps) {
 
   const files = (filesData || []) as SupabaseFile[];
 
+  const cookieStore = await cookies();
+
   // Short-lived signed preview/download URLs for each file
+  // Private files stay locked here — no signed URL is generated until
+  // the viewer has unlocked that specific file via its own /type/slug page.
   const filesWithUrls = await Promise.all(
     files.map(async (file) => {
       let signedUrl: string | null = null;
-      let originalFilename = file.slug;
+      let originalFilename =
+        file.type !== 'note' && file.storage_key
+          ? file.storage_key.split('/').pop() || file.slug
+          : file.slug;
 
-      if (file.type !== 'note' && file.storage_key) {
-        originalFilename = file.storage_key.split('/').pop() || file.slug;
+      const isUnlocked =
+        file.visibility !== 'private' ||
+        cookieStore.get(`file_unlock_${file.type}_${file.slug}`)?.value === 'granted';
+
+      if (isUnlocked && file.type !== 'note' && file.storage_key) {
         const { data: signedData } = await supabaseAdmin.storage
           .from('labdump-files')
           .createSignedUrl(file.storage_key, 120);
@@ -81,7 +92,7 @@ export default async function BundlePage({ params }: PageProps) {
         }
       }
 
-      return { file, signedUrl, originalFilename };
+      return { file, signedUrl, originalFilename, isUnlocked };
     })
   );
 
@@ -105,7 +116,7 @@ export default async function BundlePage({ params }: PageProps) {
               NO FILES IN THIS BUNDLE.
             </div>
           ) : (
-            filesWithUrls.map(({ file, signedUrl, originalFilename }) => (
+            filesWithUrls.map(({ file, signedUrl, originalFilename, isUnlocked }) => (
               <div
                 key={file.id}
                 className="border-3 border-[#000000] bg-[#FFFFFF] p-4 shadow-[4px_4px_0px_#000000] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
@@ -115,17 +126,29 @@ export default async function BundlePage({ params }: PageProps) {
                     {file.type}
                   </span>
                   <span className="text-xs font-bold truncate uppercase">
-                    {originalFilename}
+                    {isUnlocked ? originalFilename : 'PROTECTED FILE'}
                   </span>
-                  {file.size_bytes != null && (
+                  {isUnlocked && file.size_bytes != null && (
                     <span className="text-[10px] text-[#666666] font-bold shrink-0">
                       ({formatFileSize(file.size_bytes)})
+                    </span>
+                  )}
+                  {!isUnlocked && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 border border-[#FF3B00] text-[#FF3B00] uppercase shrink-0">
+                      PRIVATE
                     </span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-3 shrink-0">
-                  {file.type === 'note' ? (
+                  {!isUnlocked ? (
+                    <Link
+                      href={`/${file.type}/${file.slug}`}
+                      className="brutalist-btn px-4 py-1.5 text-xs font-bold uppercase tracking-wider"
+                    >
+                      ENTER PASSWORD →
+                    </Link>
+                  ) : file.type === 'note' ? (
                     <Link
                       href={`/note/${file.slug}`}
                       className="brutalist-btn px-4 py-1.5 text-xs font-bold uppercase tracking-wider"

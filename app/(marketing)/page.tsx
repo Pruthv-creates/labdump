@@ -1,6 +1,25 @@
 import Link from 'next/link';
+import { supabaseAdmin } from '@/lib/supabase/server';
 
-export default function LandingPage() {
+export const dynamic = 'force-dynamic';
+
+async function getFilesSharedCount(): Promise<number | null> {
+  const { count, error } = await supabaseAdmin
+    .from('files')
+    .select('id', { count: 'exact', head: true })
+    .neq('status', 'pending');
+
+  if (error) return null;
+  return count ?? null;
+}
+
+function formatCount(count: number): string {
+  return count.toLocaleString('en-US');
+}
+
+export default async function LandingPage() {
+  const filesSharedCount = await getFilesSharedCount();
+
   return (
     <main className="min-h-screen bg-[#E8E6E1] text-[#000000] flex flex-col justify-between p-6 sm:p-12 font-mono border-4 border-[#000000]">
       {/* Top Header */}
@@ -28,6 +47,12 @@ export default function LandingPage() {
             START SHARING →
           </Link>
         </div>
+
+        {filesSharedCount !== null && filesSharedCount > 0 && (
+          <div className="mt-8 text-xs font-bold uppercase tracking-wider text-[#666666]">
+            {formatCount(filesSharedCount)} FILES & NOTES SHARED SO FAR
+          </div>
+        )}
       </div>
 
       {/* Footer Info */}

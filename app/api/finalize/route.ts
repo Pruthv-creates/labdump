@@ -104,8 +104,8 @@ export async function POST(request: Request) {
     expiresAt.setMonth(expiresAt.getMonth() + 6);
 
     let filePasswordHash: string | null = null;
-    if (visibility === 'private' && password) {
-      filePasswordHash = await bcrypt.hash(password, 10);
+    if (visibility === 'private' && password && password.trim()) {
+      filePasswordHash = await bcrypt.hash(password.trim(), 10);
     }
 
     const updatePayload: Record<string, any> = {
@@ -124,16 +124,25 @@ export async function POST(request: Request) {
       updatePayload.mime_type = mime_type || null;
     }
 
-    const { error: updateError } = await supabaseAdmin
+    const { data: updatedRows, error: updateError } = await supabaseAdmin
       .from('files')
       .update(updatePayload)
       .eq('type', type)
-      .eq('slug', slug);
+      .eq('slug', slug)
+      .eq('status', 'pending')
+      .select('id');
 
     if (updateError) {
       return NextResponse.json<ApiResponse<null>>(
         { data: null, error: updateError.message },
         { status: 500 }
+      );
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      return NextResponse.json<ApiResponse<null>>(
+        { data: null, error: 'This link has already been published and cannot be finalized again.' },
+        { status: 409 }
       );
     }
 
