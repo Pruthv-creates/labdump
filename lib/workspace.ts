@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { randomBytes, createHash } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { SupabaseWorkspace, WorkspaceMode } from '@/types/database';
 
@@ -16,18 +17,6 @@ const RESERVED_WORKSPACE_SLUGS = new Set([
   'labdump',
 ]);
 
-export async function getWorkspaceByToken(token: string): Promise<SupabaseWorkspace | null> {
-  if (!token) return null;
-  const { data, error } = await supabaseAdmin
-    .from('workspaces')
-    .select('*')
-    .eq('id', token)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  return data as SupabaseWorkspace;
-}
-
 export async function getWorkspaceBySlug(slug: string): Promise<SupabaseWorkspace | null> {
   if (!slug) return null;
   const { data, error } = await supabaseAdmin
@@ -40,13 +29,6 @@ export async function getWorkspaceBySlug(slug: string): Promise<SupabaseWorkspac
   return data as SupabaseWorkspace;
 }
 
-export async function isWorkspaceOwner(token: string, slug: string): Promise<boolean> {
-  if (!token || !slug) return false;
-  const workspace = await getWorkspaceBySlug(slug);
-  if (!workspace) return false;
-  return workspace.id === token;
-}
-
 export function isWorkspaceSlugValid(slug: string): boolean {
   if (!slug || slug.length < 3 || slug.length > 30) return false;
   const validRegex = /^[a-z0-9-]+$/;
@@ -55,12 +37,37 @@ export function isWorkspaceSlugValid(slug: string): boolean {
   return true;
 }
 
+function hashRecoveryKey(key: string): string {
+  return createHash('sha256').update(key).digest('hex');
+}
+
+/**
+ * Look up a workspace by its recovery key.
+ *
+ * The key is a dedicated random secret, deliberately NOT the workspace UUID.
+ * Previously the UUID served as both the public row id and the recovery
+ * credential, so anyone who learned it — from a shared cookie, a log, or a
+ * URL — gained permanent ownership.
+ */
+export async function findWorkspaceByRecoveryKey(key: string): Promise<SupabaseWorkspace | null> {
+  if (!key) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from('workspaces')
+    .select('*')
+    .eq('recovery_key_hash', hashRecoveryKey(key))
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as SupabaseWorkspace;
+}
+
 export async function createWorkspace(
   name: string,
   slug: string,
   mode: WorkspaceMode,
   password?: string
-): Promise<SupabaseWorkspace> {
+): Promise<{ workspace: SupabaseWorkspace; recoveryKey: string }> {
   const cleanSlug = slug.trim().toLowerCase();
   if (!isWorkspaceSlugValid(cleanSlug)) {
     throw new Error('INVALID_SLUG');
@@ -71,8 +78,10 @@ export async function createWorkspace(
     if (!password || !password.trim()) {
       throw new Error('PASSWORD_REQUIRED');
     }
-    passwordHash = await bcrypt.hash(password.trim(), 10);
+    passwordHash = await bcrypt.hash(password.trim(), 12);
   }
+
+  const recoveryKey = randomBytes(24).toString('base64url');
 
   const { data, error } = await supabaseAdmin
     .from('workspaces')
@@ -82,6 +91,7 @@ export async function createWorkspace(
       mode,
       type: mode === 'public' ? 'public' : 'private',
       password_hash: passwordHash,
+      recovery_key_hash: hashRecoveryKey(recoveryKey),
     })
     .select('*')
     .single();
@@ -90,7 +100,7 @@ export async function createWorkspace(
     throw new Error(error?.message || 'FAILED_TO_CREATE_WORKSPACE');
   }
 
-  return data as SupabaseWorkspace;
+  return { workspace: data as SupabaseWorkspace, recoveryKey };
 }
 
 export async function verifyWorkspacePassword(slug: string, password?: string): Promise<boolean> {

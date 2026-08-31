@@ -1,13 +1,27 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { generateSlug, isSlugValid } from '@/lib/slug';
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { FileType, ApiResponse } from '@/types/database';
+
+const VALID_TYPES: FileType[] = ['pdf', 'image', 'docx', 'audio', 'note', 'file'];
 
 export async function POST(request: Request) {
   try {
+    // Each call reserves a DB row, so this is the main way to flood the table.
+    const limited = await enforceRateLimit(request, 'slug-reserve', 60, 60 * 60);
+    if (limited) return limited;
+
     const body = await request.json();
     const type: FileType = body.type;
-    const inputSlug: string | undefined = body.slug ? body.slug.trim().toLowerCase() : undefined;
+    const inputSlug: string | undefined = body.slug ? String(body.slug).trim().toLowerCase() : undefined;
+
+    if (!type || !VALID_TYPES.includes(type)) {
+      return NextResponse.json<ApiResponse<null>>(
+        { data: null, error: 'Invalid file type.' },
+        { status: 400 }
+      );
+    }
 
     let targetSlug: string;
 
@@ -23,7 +37,6 @@ export async function POST(request: Request) {
       targetSlug = generateSlug();
     }
 
-    // Check (type, slug) uniqueness in files table
     const { data: existingFile, error: checkError } = await supabaseAdmin
       .from('files')
       .select('id')
@@ -33,13 +46,12 @@ export async function POST(request: Request) {
 
     if (checkError) {
       return NextResponse.json<ApiResponse<null>>(
-        { data: null, error: checkError.message },
+        { data: null, error: 'Could not reserve this link.' },
         { status: 500 }
       );
     }
 
     if (existingFile) {
-      // Taken: generate 3 alternatives
       const alt1 = `${targetSlug}-2`;
       const alt2 = `${targetSlug}-3`;
       const alt3 = `${targetSlug}-${generateSlug().slice(0, 4)}`;
@@ -53,25 +65,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create temporary private workspace row
-    const { data: workspace, error: wsError } = await supabaseAdmin
-      .from('workspaces')
-      .insert({
-        name: 'Temporary Workspace',
-        type: 'private',
-      })
-      .select('id')
-      .single();
-
-    if (wsError || !workspace) {
-      return NextResponse.json<ApiResponse<null>>(
-        { data: null, error: wsError?.message || 'Failed to create workspace' },
-        { status: 500 }
-      );
-    }
-
-    // Insert pending file row
-    // Default expires_at to 6 months from now in case pending cleanup needed
+    // Pending rows start with no workspace. Association happens at finalize,
+    // and only for a verified owner — we no longer mint a throwaway workspace
+    // here, which used to leave orphan rows behind on every abandoned upload.
     const defaultExpiry = new Date();
     defaultExpiry.setMonth(defaultExpiry.getMonth() + 6);
 
@@ -81,13 +77,13 @@ export async function POST(request: Request) {
         type,
         slug: targetSlug,
         status: 'pending',
-        workspace_id: workspace.id,
+        workspace_id: null,
         expires_at: defaultExpiry.toISOString(),
       });
 
     if (insertError) {
       return NextResponse.json<ApiResponse<null>>(
-        { data: null, error: insertError.message },
+        { data: null, error: 'Could not reserve this link.' },
         { status: 500 }
       );
     }
@@ -96,9 +92,9 @@ export async function POST(request: Request) {
       data: { slug: targetSlug, type },
       error: null,
     });
-  } catch (err: any) {
+  } catch {
     return NextResponse.json<ApiResponse<null>>(
-      { data: null, error: err.message || 'Internal server error' },
+      { data: null, error: 'Internal server error' },
       { status: 500 }
     );
   }

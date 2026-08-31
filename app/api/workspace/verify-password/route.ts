@@ -1,30 +1,14 @@
 import { NextResponse } from 'next/server';
 import { verifyWorkspacePassword } from '@/lib/workspace';
+import { enforceRateLimit } from '@/lib/rate-limit';
+import { MAX_PASSWORD_LENGTH } from '@/lib/validation';
 import { ApiResponse } from '@/types/database';
-
-const verifyRateLimitMap = new Map<string, { count: number; expiresAt: number }>();
-
-function isVerifyRateLimited(ip: string, slug: string): boolean {
-  const key = `${ip}:${slug}`;
-  const now = Date.now();
-  const entry = verifyRateLimitMap.get(key);
-
-  if (!entry || now > entry.expiresAt) {
-    verifyRateLimitMap.set(key, { count: 1, expiresAt: now + 60 * 60 * 1000 }); // 1 hour
-    return false;
-  }
-
-  if (entry.count >= 10) {
-    return true;
-  }
-
-  entry.count += 1;
-  return false;
-}
 
 export async function POST(request: Request) {
   try {
-    const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || '127.0.0.1';
+    const limited = await enforceRateLimit(request, 'workspace-verify', 10, 15 * 60);
+    if (limited) return limited;
+
     const body = await request.json();
     const { slug, password }: { slug?: string; password?: string } = body;
 
@@ -35,10 +19,10 @@ export async function POST(request: Request) {
       );
     }
 
-    if (isVerifyRateLimited(ip, slug)) {
+    if (password.length > MAX_PASSWORD_LENGTH) {
       return NextResponse.json<ApiResponse<null>>(
-        { data: null, error: 'TOO_MANY_ATTEMPTS' },
-        { status: 429 }
+        { data: null, error: 'WRONG_PASSWORD' },
+        { status: 401 }
       );
     }
 
@@ -59,15 +43,15 @@ export async function POST(request: Request) {
     response.cookies.set(`workspace_access_${slug}`, 'granted', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 24 * 60 * 60, // 24 hours
+      sameSite: 'strict',
+      // Session-scoped on purpose — see the unlock route.
       path: '/',
     });
 
     return response;
-  } catch (err: any) {
+  } catch {
     return NextResponse.json<ApiResponse<null>>(
-      { data: null, error: err.message || 'INTERNAL_ERROR' },
+      { data: null, error: 'INTERNAL_ERROR' },
       { status: 500 }
     );
   }

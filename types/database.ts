@@ -15,8 +15,16 @@ export interface SupabaseWorkspace {
   type: WorkspaceType;
   mode: WorkspaceMode;
   password_hash: string | null;
+  recovery_key_hash: string | null;
   share_token: string | null;
   share_enabled: boolean;
+  created_at: string;
+}
+
+export interface OwnerSession {
+  token_hash: string;
+  workspace_id: string;
+  expires_at: string;
   created_at: string;
 }
 
@@ -31,7 +39,7 @@ export interface SupabaseFile {
   mime_type: string | null;
   size_bytes: number | null;
   view_count: number;
-  workspace_id: string;
+  workspace_id: string | null;
   file_token: string;
   password_hash: string | null;
   created_at: string;

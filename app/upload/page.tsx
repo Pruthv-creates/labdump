@@ -201,8 +201,6 @@ export default function UploadPage() {
               type,
               slug: reservedSlug,
               storage_key,
-              size_bytes: file.size,
-              mime_type: file.type,
               visibility,
               password: visibility === 'private' ? filePassword : undefined,
               bundle_workspace_id: bundleWorkspaceId,
@@ -319,10 +317,20 @@ export default function UploadPage() {
             LABDUMP
           </Link>
           {workspaceInfo && (
-            <div className="text-xs font-bold uppercase">
+            <div className="flex items-center gap-3 text-xs font-bold uppercase">
               <Link href={`/w/${workspaceInfo.slug}`} className="hover:underline text-[#666666]">
                 MY FILES →
               </Link>
+              {/* Shared lab PCs: never leave a session attached to the browser. */}
+              <button
+                onClick={async () => {
+                  await fetch('/api/workspace/logout', { method: 'POST' });
+                  setWorkspaceInfo(null);
+                }}
+                className="bg-[#FF3B00] text-[#FFFFFF] text-[10px] px-2 py-1 uppercase border-2 border-[#000000]"
+              >
+                SIGN OUT
+              </button>
             </div>
           )}
         </header>

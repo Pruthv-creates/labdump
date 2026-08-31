@@ -20,6 +20,10 @@ export default function CreateWorkspacePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [createdSlug, setCreatedSlug] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
+
   // Debounced slug check
   useEffect(() => {
     if (!slug.trim()) {
@@ -74,7 +78,12 @@ export default function CreateWorkspacePage() {
         }),
       });
 
-      const result: ApiResponse<{ slug: string; mode: WorkspaceMode; name: string }> = await res.json();
+      const result: ApiResponse<{
+        slug: string;
+        mode: WorkspaceMode;
+        name: string;
+        recoveryKey: string;
+      }> = await res.json();
 
       if (result.error || !result.data) {
         if (result.error === 'SLUG_TAKEN') {
@@ -86,7 +95,11 @@ export default function CreateWorkspacePage() {
         return;
       }
 
-      router.push(`/w/${result.data.slug}`);
+      // The recovery key is only ever returned here — it is stored hashed and
+      // cannot be shown again. Make the student save it before moving on.
+      setRecoveryKey(result.data.recoveryKey);
+      setCreatedSlug(result.data.slug);
+      setIsLoading(false);
     } catch (err: any) {
       setErrorMsg(`— ${err.message || 'UNEXPECTED ERROR'}`);
       setIsLoading(false);
@@ -103,6 +116,48 @@ export default function CreateWorkspacePage() {
           </Link>
         </header>
 
+        {recoveryKey && createdSlug ? (
+          <div className="space-y-6">
+            <h1 className="text-xl font-bold uppercase tracking-wide">
+              SAVE YOUR RECOVERY KEY
+            </h1>
+
+            <div className="border-3 border-[#000000] bg-[#FFFFFF] p-6 shadow-[4px_4px_0px_#000000] space-y-4">
+              <div className="text-xs font-bold uppercase text-[#FF3B00]">
+                THIS IS SHOWN ONCE. IT CANNOT BE RECOVERED LATER.
+                WITHOUT IT YOU LOSE ACCESS TO THIS WORKSPACE.
+              </div>
+
+              <div className="p-3 bg-[#E8E6E1] border-2 border-[#000000] font-mono text-xs font-bold select-all break-all">
+                {recoveryKey}
+              </div>
+
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(recoveryKey);
+                  setCopiedKey(true);
+                  setTimeout(() => setCopiedKey(false), 2000);
+                }}
+                className="brutalist-btn-accent px-6 py-3 text-xs uppercase tracking-wider"
+              >
+                {copiedKey ? 'COPIED!' : 'COPY KEY'}
+              </button>
+            </div>
+
+            <div className="border-2 border-[#000000] bg-[#FFFFFF] p-3 text-xs font-bold uppercase text-[#666666]">
+              ON A SHARED LAB PC, SIGN OUT WHEN YOU FINISH — YOUR SESSION ALSO
+              ENDS WHEN THE BROWSER CLOSES.
+            </div>
+
+            <button
+              onClick={() => router.push(`/w/${createdSlug}`)}
+              className="w-full py-4 text-sm font-bold tracking-widest uppercase bg-[#000000] text-[#FFFFFF] border-2 border-[#000000] shadow-[4px_4px_0px_#000000] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+            >
+              I SAVED IT — OPEN WORKSPACE →
+            </button>
+          </div>
+        ) : (
+        <>
         <h1 className="text-xl font-bold uppercase tracking-wide">
           CREATE YOUR WORKSPACE
         </h1>
@@ -206,6 +261,8 @@ export default function CreateWorkspacePage() {
             {isLoading ? 'CREATING...' : 'CREATE WORKSPACE →'}
           </button>
         </div>
+        </>
+        )}
       </div>
     </main>
   );

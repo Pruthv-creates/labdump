@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { generateSlug } from '@/lib/slug';
 import { isWorkspaceSlugValid } from '@/lib/workspace';
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { ApiResponse } from '@/types/database';
 
 export async function POST(request: Request) {
   try {
+    const limited = await enforceRateLimit(request, 'bundle-create', 20, 60 * 60);
+    if (limited) return limited;
+
     const body = await request.json();
-    const inputSlug: string | undefined = body.slug ? body.slug.trim().toLowerCase() : undefined;
+    const inputSlug: string | undefined = body.slug ? String(body.slug).trim().toLowerCase() : undefined;
 
     let targetSlug: string;
 
@@ -49,7 +53,7 @@ export async function POST(request: Request) {
 
     if (error || !bundle) {
       return NextResponse.json<ApiResponse<null>>(
-        { data: null, error: error?.message || 'Failed to create bundle' },
+        { data: null, error: 'Failed to create bundle' },
         { status: 500 }
       );
     }
@@ -58,9 +62,9 @@ export async function POST(request: Request) {
       data: { id: bundle.id, slug: bundle.slug },
       error: null,
     });
-  } catch (err: any) {
+  } catch {
     return NextResponse.json<ApiResponse<null>>(
-      { data: null, error: err.message || 'Internal server error' },
+      { data: null, error: 'Internal server error' },
       { status: 500 }
     );
   }

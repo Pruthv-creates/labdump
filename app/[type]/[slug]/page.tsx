@@ -1,6 +1,7 @@
 import { Metadata } from 'next';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
+import { after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { SupabaseFile } from '@/types/database';
 import { DownloadButton } from '@/components/features/DownloadButton';
@@ -79,17 +80,16 @@ export default async function RetrievalPage({ params }: PageProps) {
   const diffTime = expiresDate.getTime() - new Date().getTime();
   const diffDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 
-  // Increment view count (fire and forget)
-  void (async () => {
+  // Increment the view count after the response is sent. Read-then-write from
+  // the render pass lost concurrent views and left a floating promise; an
+  // atomic RPC scheduled via `after` avoids both.
+  after(async () => {
     try {
-      await supabaseAdmin
-        .from('files')
-        .update({ view_count: (typedFile.view_count || 0) + 1 })
-        .eq('id', typedFile.id);
+      await supabaseAdmin.rpc('increment_view_count', { p_file_id: typedFile.id });
     } catch {
-      // Ignore increment errors
+      // A missed view count must never break the page.
     }
-  })();
+  });
 
   // Generate short-lived preview URL (inline disposition)
   let previewUrl: string | null = null;

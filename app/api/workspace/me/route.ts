@@ -1,26 +1,13 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
-import { getWorkspaceByToken } from '@/lib/workspace';
+import { getSessionWorkspace } from '@/lib/session';
 import { ApiResponse, WorkspaceMode } from '@/types/database';
 
 export async function GET() {
   try {
-    const headerList = await headers();
-    const ownerToken = headerList.get('x-owner-token');
+    const workspace = await getSessionWorkspace();
 
-    if (!ownerToken) {
-      return NextResponse.json<ApiResponse<null>>({
-        data: null,
-        error: null,
-      });
-    }
-
-    const workspace = await getWorkspaceByToken(ownerToken);
     if (!workspace) {
-      return NextResponse.json<ApiResponse<null>>({
-        data: null,
-        error: null,
-      });
+      return NextResponse.json<ApiResponse<null>>({ data: null, error: null });
     }
 
     return NextResponse.json<ApiResponse<{ slug: string; name: string; mode: WorkspaceMode }>>({
@@ -31,9 +18,9 @@ export async function GET() {
       },
       error: null,
     });
-  } catch (err: any) {
+  } catch {
     return NextResponse.json<ApiResponse<null>>(
-      { data: null, error: err.message || 'INTERNAL_ERROR' },
+      { data: null, error: 'INTERNAL_ERROR' },
       { status: 500 }
     );
   }

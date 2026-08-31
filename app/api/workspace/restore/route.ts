@@ -1,48 +1,28 @@
 import { NextResponse } from 'next/server';
-import { getWorkspaceByToken } from '@/lib/workspace';
+import { findWorkspaceByRecoveryKey } from '@/lib/workspace';
+import { createOwnerSession, OWNER_COOKIE, ownerCookieOptions } from '@/lib/session';
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { WorkspaceMode, ApiResponse } from '@/types/database';
-
-const rateLimitMap = new Map<string, { count: number; expiresAt: number }>();
-
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (!entry || now > entry.expiresAt) {
-    rateLimitMap.set(ip, { count: 1, expiresAt: now + 60 * 60 * 1000 }); // 1 hour
-    return false;
-  }
-
-  if (entry.count >= 5) {
-    return true;
-  }
-
-  entry.count += 1;
-  return false;
-}
 
 export async function POST(request: Request) {
   try {
-    const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || '127.0.0.1';
-
-    if (isRateLimited(ip)) {
-      return NextResponse.json<ApiResponse<null>>(
-        { data: null, error: 'RATE_LIMIT_EXCEEDED' },
-        { status: 429 }
-      );
-    }
+    // Recovery keys are the one long-lived secret in the system, so this
+    // endpoint is the most attractive brute-force target. The limit is shared
+    // across serverless instances and keyed on a platform-verified IP.
+    const limited = await enforceRateLimit(request, 'workspace-restore', 5, 60 * 60);
+    if (limited) return limited;
 
     const body = await request.json();
     const { token }: { token?: string } = body;
 
-    if (!token) {
+    if (!token || typeof token !== 'string' || token.length > 200) {
       return NextResponse.json<ApiResponse<null>>(
         { data: null, error: 'INVALID_TOKEN' },
         { status: 400 }
       );
     }
 
-    const workspace = await getWorkspaceByToken(token.trim());
+    const workspace = await findWorkspaceByRecoveryKey(token.trim());
     if (!workspace) {
       return NextResponse.json<ApiResponse<null>>(
         { data: null, error: 'INVALID_TOKEN' },
@@ -50,7 +30,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const response = NextResponse.json<ApiResponse<{ slug: string; name: string; mode: WorkspaceMode }>>({
+    const response = NextResponse.json<
+      ApiResponse<{ slug: string; name: string; mode: WorkspaceMode }>
+    >({
       data: {
         slug: workspace.slug,
         name: workspace.name,
@@ -59,18 +41,13 @@ export async function POST(request: Request) {
       error: null,
     });
 
-    response.cookies.set('owner_token', workspace.id, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 365 * 24 * 60 * 60,
-      path: '/',
-    });
+    const sessionToken = await createOwnerSession(workspace.id);
+    response.cookies.set(OWNER_COOKIE, sessionToken, ownerCookieOptions());
 
     return response;
-  } catch (err: any) {
+  } catch {
     return NextResponse.json<ApiResponse<null>>(
-      { data: null, error: err.message || 'INTERNAL_ERROR' },
+      { data: null, error: 'INTERNAL_ERROR' },
       { status: 500 }
     );
   }

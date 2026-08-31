@@ -26,9 +26,7 @@ export function validateFile(file: File): {
   error: string | null;
   type: FileType | null;
 } {
-  const maxSizeInBytes = 50 * 1024 * 1024; // 50MB
-
-  if (file.size > maxSizeInBytes) {
+  if (file.size > MAX_UPLOAD_BYTES) {
     const sizeInMB = (file.size / (1024 * 1024)).toFixed(1);
     return {
       valid: false,
@@ -43,3 +41,8 @@ export function validateFile(file: File): {
     type: getMimeToType(file.type),
   };
 }
+
+/** Shared limits, enforced on the server as well as in the browser. */
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB
+export const MAX_NOTE_CHARS = 100_000;
+export const MAX_PASSWORD_LENGTH = 200;

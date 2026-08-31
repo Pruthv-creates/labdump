@@ -147,24 +147,26 @@ export function InlineDropZone({ workspaceId }: { workspaceId: string }) {
     if (uploadData.error) throw new Error(uploadData.error);
 
     // Storage PUT
-    await fetch(uploadData.data.signedUrl, {
+    const putRes = await fetch(uploadData.data.signedUrl, {
       method: 'PUT',
       headers: { 'Content-Type': file.type || 'application/octet-stream' },
       body: file,
     });
+    if (!putRes.ok) throw new Error('STORAGE UPLOAD FAILED');
 
     // 3. Finalize
-    await fetch('/api/finalize', {
+    const finalizeRes = await fetch('/api/finalize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         type,
         slug: reservedSlug,
         storage_key: uploadData.data.storage_key,
-        size_bytes: file.size,
-        mime_type: file.type || 'application/octet-stream',
+        bundle_workspace_id: workspaceId,
       }),
     });
+    const finalizeData = await finalizeRes.json();
+    if (finalizeData.error) throw new Error(finalizeData.error);
   };
 
   return (
@@ -184,42 +186,47 @@ export function InlineDropZone({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-export function WorkspaceRecoverySection({ token }: { token: string }) {
-  const [revealed, setRevealed] = useState(false);
-  const [copied, setCopied] = useState(false);
+/**
+ * The recovery key is shown once, at creation, and only its hash is stored.
+ * It can no longer be re-displayed here: on a shared lab PC that let anyone
+ * holding a live session walk away with permanent ownership of the workspace.
+ */
+export function WorkspaceRecoverySection() {
+  return (
+    <div className="pt-8 border-t-2 border-[#000000] space-y-3">
+      <div className="text-xs font-bold uppercase text-[#666666]">
+        RECOVERY KEY
+      </div>
+      <div className="border-2 border-[#000000] bg-[#FFFFFF] p-4 shadow-[4px_4px_0px_#000000] text-xs font-bold uppercase text-[#666666]">
+        SHOWN ONCE WHEN THIS WORKSPACE WAS CREATED. IT CANNOT BE DISPLAYED AGAIN.
+      </div>
+    </div>
+  );
+}
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(token);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+export function SignOutButton() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+
+  const handleSignOut = async () => {
+    setBusy(true);
+    try {
+      await fetch('/api/workspace/logout', { method: 'POST' });
+      router.push('/');
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <div className="pt-8 border-t-2 border-[#000000] space-y-4">
-      {!revealed ? (
-        <button
-          onClick={() => setRevealed(true)}
-          className="brutalist-btn px-4 py-2 text-xs uppercase"
-        >
-          RECOVERY KEY →
-        </button>
-      ) : (
-        <div className="border-2 border-[#000000] bg-[#FFFFFF] p-4 shadow-[4px_4px_0px_#000000] space-y-3">
-          <div className="text-xs font-bold uppercase text-[#FF3B00]">
-            WARNING: SAVE THIS KEY. LOSING IT MEANS LOSING ACCESS TO THIS WORKSPACE.
-          </div>
-          <div className="p-3 bg-[#E8E6E1] border-2 border-[#000000] font-mono text-xs font-bold select-all break-all">
-            {token}
-          </div>
-          <button
-            onClick={handleCopy}
-            className="brutalist-btn-accent px-4 py-2 text-xs uppercase"
-          >
-            {copied ? 'COPIED!' : 'COPY KEY'}
-          </button>
-        </div>
-      )}
-    </div>
+    <button
+      onClick={handleSignOut}
+      disabled={busy}
+      className="bg-[#FF3B00] text-[#FFFFFF] text-[10px] font-bold px-3 py-1.5 uppercase border-2 border-[#000000] disabled:opacity-50"
+    >
+      {busy ? '...' : 'SIGN OUT'}
+    </button>
   );
 }
 

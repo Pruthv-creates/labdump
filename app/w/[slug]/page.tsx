@@ -1,8 +1,9 @@
 import { Metadata } from 'next';
 import Link from 'next/link';
-import { headers, cookies } from 'next/headers';
+import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { getWorkspaceBySlug, isWorkspaceOwner } from '@/lib/workspace';
+import { getWorkspaceBySlug } from '@/lib/workspace';
+import { getSessionWorkspace } from '@/lib/session';
 import { SupabaseFile } from '@/types/database';
 import {
   WorkspacePasswordPrompt,
@@ -10,6 +11,7 @@ import {
   WorkspaceRecoverySection,
   CopyLinkButton,
   DeleteFileButton,
+  SignOutButton,
 } from './WorkspaceClientComponents';
 
 export const metadata: Metadata = {
@@ -53,9 +55,10 @@ export default async function WorkspacePage({ params }: PageProps) {
     );
   }
 
-  const headerList = await headers();
-  const ownerToken = headerList.get('x-owner-token') || '';
-  const isOwner = await isWorkspaceOwner(ownerToken, slug);
+  // Ownership comes from the signed-in session only — never from a header or
+  // a long-lived cookie that a later student on the same PC would inherit.
+  const sessionWorkspace = await getSessionWorkspace();
+  const isOwner = sessionWorkspace?.id === workspace.id;
 
   const cookieStore = await cookies();
   const hasAccessCookie = cookieStore.get(`workspace_access_${slug}`)?.value === 'granted';
@@ -128,6 +131,8 @@ export default async function WorkspacePage({ params }: PageProps) {
             <div className="bg-[#000000] text-[#FFFFFF] px-3 py-1 text-xs font-bold uppercase tracking-wider border-2 border-[#000000]">
               {workspace.mode.toUpperCase()}
             </div>
+            {/* Shared lab PCs: let a student end their session deliberately. */}
+            {isOwner && <SignOutButton />}
           </div>
         </header>
 
@@ -214,7 +219,7 @@ export default async function WorkspacePage({ params }: PageProps) {
         </div>
 
         {/* Recovery Key (Owner only) */}
-        {isOwner && <WorkspaceRecoverySection token={workspace.id} />}
+        {isOwner && <WorkspaceRecoverySection />}
       </div>
 
       {/* Footer */}
